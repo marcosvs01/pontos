@@ -1,4 +1,4 @@
-const CACHE = 'pontos-4';
+const CACHE = 'pontos-5';
 const APP = ['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE)
