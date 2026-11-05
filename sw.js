@@ -1,6 +1,5 @@
-const CACHE = 'pontos-1';
+const CACHE = 'pontos-2';
 const APP = ['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
-const OCR = ['tesseract.min.js','worker.min.js','tesseract-core-lstm.wasm.js','tesseract-core-simd-lstm.wasm.js','eng.traineddata.gz'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE)
     .then(c => c.addAll(APP.map(f => new Request(f, { cache: 'reload' }))))
@@ -8,8 +7,6 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== CACHE).map(x => caches.delete(x)))).then(() => self.clients.claim()));
-  /* A leitura da foto é baixada à parte: se o sinal cair, o app continua instalado. */
-  caches.open(CACHE).then(c => OCR.forEach(f => c.match(f).then(h => h || c.add(f).catch(() => {}))));
 });
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
