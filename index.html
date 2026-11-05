@@ -38,6 +38,7 @@ button:disabled{opacity:.4}
 .row strong{display:block}
 .row button{margin-top:6px;min-height:40px}
 .empty{color:var(--mid);padding:8px 0}
+#difInfo{color:var(--ink);font-size:18px;font-weight:700;margin:8px 0 0}
 </style>
 </head>
 <body>
@@ -73,6 +74,7 @@ button:disabled{opacity:.4}
     <input id="valor" inputmode="numeric" autocomplete="off">
     <p class="hint" id="difInfo"></p>
     <p class="msg alert" id="aviso" hidden></p>
+    <p class="msg" id="feito" role="status" hidden></p>
     <button class="main" id="enviar" style="margin-top:12px">Enviar ponto</button>
 
     <h2>Meus lançamentos neste celular</h2>
@@ -93,6 +95,7 @@ const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2));
 const num = (v,tipo) => Number(v).toLocaleString('pt-BR',{maximumFractionDigits:tipo==='HORIMETRO'?1:0});
 const unidade = t => t==='HORIMETRO' ? 'h' : 'km';
+const rotulo = (t,d) => (t==='HORIMETRO'?'Trabalhou ':'Percorreu ')+num(d,t)+' '+unidade(t);
 
 function lsGet(k,f){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):f; }catch(e){ return f; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); return true; }catch(e){ return false; } }
@@ -120,7 +123,13 @@ function historico(placa){
   return DADOS.ultimos[placa]?[DADOS.ultimos[placa]]:[];
 }
 const jaApontado=(placa,d)=>historico(placa).some(h=>h.data===d);
-function anterior(placa,d){ return historico(placa).filter(h=>h.data<d).sort((a,b)=>a.data.localeCompare(b.data)).pop(); }
+function anterior(placa,d){
+  const h=historico(placa).filter(h=>h.data<d).sort((a,b)=>a.data.localeCompare(b.data)).pop();
+  if(h) return h;
+  const v=DADOS.veiculos.find(x=>x.placa===placa);
+  return v&&typeof v.inicial==='number'?{data:null,valor:v.inicial}:undefined;
+}
+const quando=u=>u.data?'de '+brShort(u.data):'cadastrada';
 function proxima(placa,d){ return historico(placa).filter(h=>h.data>d).sort((a,b)=>a.data.localeCompare(b.data))[0]; }
 function registrarLocal(placa,data,valor){
   const h=historico(placa).concat([{data,valor}]).sort((a,b)=>a.data.localeCompare(b.data));
@@ -179,7 +188,7 @@ async function enviarFila(){
       catch(e){ break; } /* sem sinal: tenta de novo depois */
       if(r.ok){
         const h=lsGet('pontos-hist',[]);
-        h.unshift({id:it.id,data:it.data,placa:it.placa,valor:it.valor,tipo:it.tipo,situacao:r.situacao||'',quando:it.quando});
+        h.unshift({id:it.id,data:it.data,placa:it.placa,valor:it.valor,tipo:it.tipo,dif:it.dif,situacao:r.situacao||'',quando:it.quando});
         lsSet('pontos-hist',h.slice(0,30));
         await filaDel(it.id);
       }else if(r.codigo==='senha'){
@@ -258,11 +267,12 @@ function atualizarInfo(){
   const v=veiculo(); const u=v&&anterior(v.placa,dia||'9999-12-31');
   $('valorLbl').textContent=v&&v.tipo==='HORIMETRO'?'Horímetro atual':'KM atual';
   $('valor').inputMode=v&&v.tipo==='HORIMETRO'?'decimal':'numeric';
-  $('placaInfo').textContent=!v?'':u?'Última leitura: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)+' em '+brShort(u.data):'Primeira leitura desta placa.';
+  $('placaInfo').textContent=!v?'':u?(u.data?'Última leitura: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)+' em '+brShort(u.data):'Leitura anterior cadastrada: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)):'Primeira leitura desta placa.';
   const n=lerValor();
-  $('difInfo').textContent=(v&&u&&!isNaN(n))?'Diferença: '+num(n-u.valor,v.tipo)+' '+unidade(v.tipo):'';
+  $('difInfo').textContent=(v&&u&&!isNaN(n))?rotulo(v.tipo,n-u.valor)+' desde a leitura '+quando(u):'';
   confirmado=confirmado===$('valor').value?confirmado:'';
   aviso('');
+  if($('valor').value) $('feito').hidden=true;
   $('enviar').textContent='Enviar ponto';
 }
 $('placa').onchange=()=>{ desenharDias(); atualizarInfo(); }; $('valor').oninput=atualizarInfo;
@@ -278,19 +288,22 @@ $('enviar').onclick=async()=>{
   const u=anterior(v.placa,dia), prox=proxima(v.placa,dia); const raw=$('valor').value;
   const limite=LIMITE[v.tipo];
   let alerta='';
-  if(u&&n<u.valor) alerta='Essa leitura é menor que a anterior ('+num(u.valor,v.tipo)+' em '+brShort(u.data)+').';
+  if(u&&n<u.valor) alerta='Essa leitura é menor que a anterior ('+num(u.valor,v.tipo)+', '+quando(u)+').';
   else if(prox&&n>prox.valor) alerta='Essa leitura é maior que a de '+brShort(prox.data)+' ('+num(prox.valor,v.tipo)+').';
-  else if(u&&n-u.valor>limite) alerta=(v.tipo==='HORIMETRO'?'O equipamento trabalhou ':'O carro andou ')+num(n-u.valor,v.tipo)+' '+unidade(v.tipo)+' desde a leitura de '+brShort(u.data)+', acima do limite de '+limite+' '+unidade(v.tipo)+'.';
+  else if(u&&n-u.valor>limite) alerta=(v.tipo==='HORIMETRO'?'O equipamento trabalhou ':'O carro andou ')+num(n-u.valor,v.tipo)+' '+unidade(v.tipo)+' desde a leitura '+quando(u)+', acima do limite de '+limite+' '+unidade(v.tipo)+'.';
   if(alerta&&confirmado!==raw){
     confirmado=raw; aviso(alerta+' Confira e toque de novo para enviar assim mesmo.');
     $('enviar').textContent='Enviar assim mesmo'; return;
   }
-  const item={id:uid(),usuario:SESSAO.usuario,pin:SESSAO.pin,data:dia,placa:v.placa,tipo:v.tipo,valor:n,quando:new Date().toISOString()};
+  const dif=u?n-u.valor:null;
+  const item={id:uid(),usuario:SESSAO.usuario,pin:SESSAO.pin,data:dia,placa:v.placa,tipo:v.tipo,valor:n,dif,quando:new Date().toISOString()};
   try{ await filaPut(item); }
   catch(e){ aviso('Não foi possível salvar neste celular. Libere espaço e tente de novo.'); return; }
   try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(e){}
   registrarLocal(v.placa,dia,n); lsSet('pontos-dados',DADOS);
   $('valor').value=''; dia=''; confirmado=''; desenharDias(); desenharPlacas(); atualizarInfo();
+  $('feito').textContent='Ponto de '+brShort(item.data)+' salvo.'+(dif!==null?' '+rotulo(v.tipo,dif)+' desde a leitura anterior.':'');
+  $('feito').hidden=false;
   $('placa').focus();
   await desenharLista();
   enviarFila();
@@ -304,7 +317,7 @@ async function desenharLista(){
   const pend=fila.filter(i=>!i.erro).length, errs=fila.filter(i=>i.erro).length;
   $('statusTxt').textContent=errs?errs+' ponto(s) recusado(s). Veja abaixo.':pend?pend+' ponto(s) salvo(s) no celular, aguardando sinal.':'Todos os pontos foram enviados.';
   $('sendNow').hidden=!pend;
-  const linha=(x,st,extra)=>'<div class="row"><strong>'+esc(x.placa)+' · '+num(x.valor,x.tipo)+' '+unidade(x.tipo)+'</strong>Dia '+br(x.data)+' · '+esc(st)+(extra||'')+'</div>';
+  const linha=(x,st,extra)=>'<div class="row"><strong>'+esc(x.placa)+' · '+num(x.valor,x.tipo)+' '+unidade(x.tipo)+'</strong>Dia '+br(x.data)+(typeof x.dif==='number'?' · '+rotulo(x.tipo,x.dif):'')+' · '+esc(st)+(extra||'')+'</div>';
   const h=fila.map(i=>i.erro
     ?linha(i,i.erro,'<br><button data-rem="'+i.id+'">Excluir do celular</button>')
     :linha(i,'Aguardando envio')).concat(hist.map(i=>linha(i,i.situacao&&i.situacao!=='OK'?'Enviado: '+i.situacao:'Enviado')));
