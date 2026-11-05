@@ -110,6 +110,26 @@ function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); return true
 let CFG=lsGet('pontos-cfg',null);
 let DADOS=lsGet('pontos-dados',{usuarios:[],veiculos:[],ultimos:{}});
 let SESSAO=lsGet('pontos-sessao',null);
+DADOS.historico=DADOS.historico||{};
+const LIMITE={KM:300,HORIMETRO:12};
+
+/* ---------- leituras já apontadas por placa ---------- */
+function historico(placa){
+  const h=DADOS.historico[placa];
+  if(h) return h;
+  return DADOS.ultimos[placa]?[DADOS.ultimos[placa]]:[];
+}
+const jaApontado=(placa,d)=>historico(placa).some(h=>h.data===d);
+function anterior(placa,d){ return historico(placa).filter(h=>h.data<d).sort((a,b)=>a.data.localeCompare(b.data)).pop(); }
+function proxima(placa,d){ return historico(placa).filter(h=>h.data>d).sort((a,b)=>a.data.localeCompare(b.data))[0]; }
+function registrarLocal(placa,data,valor){
+  const h=historico(placa).concat([{data,valor}]).sort((a,b)=>a.data.localeCompare(b.data));
+  DADOS.historico[placa]=h;
+  DADOS.ultimos[placa]=h[h.length-1];
+}
+async function mesclarFila(){
+  (await filaTudo()).filter(i=>!i.erro).forEach(i=>{ if(!jaApontado(i.placa,i.data)) registrarLocal(i.placa,i.data,i.valor); });
+}
 
 async function api(body){
   const r=await fetch(CFG.u,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({key:CFG.k},body))});
@@ -121,7 +141,8 @@ async function carregarDados(){
   if(!r.ok) throw new Error('rede');
   const j=await r.json();
   if(!j.ok) throw new Error(j.erro||'erro');
-  DADOS={usuarios:j.usuarios,veiculos:j.veiculos,ultimos:j.ultimos};
+  DADOS={usuarios:j.usuarios,veiculos:j.veiculos,ultimos:j.ultimos,historico:j.historico||{}};
+  await mesclarFila();
   lsSet('pontos-dados',DADOS);
 }
 
@@ -170,7 +191,7 @@ async function enviarFila(){
   }catch(e){}
   finally{ enviando=false; }
   await desenharLista();
-  try{ if((await filaTudo()).filter(i=>!i.erro).length===0){ await carregarDados(); if(SESSAO) atualizarInfo(); } }catch(e){}
+  try{ if((await filaTudo()).filter(i=>!i.erro).length===0){ await carregarDados(); if(SESSAO){ desenharDias(); atualizarInfo(); } } }catch(e){}
 }
 
 /* ---------- login ---------- */
@@ -220,8 +241,12 @@ function desenharPlacas(){
 }
 function desenharDias(){
   const hoje=today(), ontem=addDays(hoje,-1);
-  if(dia!==hoje && dia!==ontem) dia='';
-  $('dias').innerHTML=[[ontem,'Ontem'],[hoje,'Hoje']].map(([d,n])=>'<button data-d="'+d+'" class="'+(d===dia?'on':'')+'" aria-pressed="'+(d===dia)+'">'+n+', '+brShort(d)+'</button>').join('');
+  const v=veiculo();
+  const travado=d=>!!v&&jaApontado(v.placa,d);
+  if((dia!==hoje && dia!==ontem)||travado(dia)) dia='';
+  $('dias').innerHTML=[[ontem,'Ontem'],[hoje,'Hoje']].map(([d,n])=>travado(d)
+    ?'<button disabled>'+n+', '+brShort(d)+': já apontado</button>'
+    :'<button data-d="'+d+'" class="'+(d===dia?'on':'')+'" aria-pressed="'+(d===dia)+'">'+n+', '+brShort(d)+'</button>').join('');
 }
 $('dias').onclick=e=>{ const b=e.target.closest('button'); if(b){ dia=b.dataset.d; desenharDias(); atualizarInfo(); } };
 function lerValor(){
@@ -230,7 +255,7 @@ function lerValor(){
   return /^\d+$/.test(raw)?Number(raw):NaN;
 }
 function atualizarInfo(){
-  const v=veiculo(); const u=v&&DADOS.ultimos[v.placa];
+  const v=veiculo(); const u=v&&anterior(v.placa,dia||'9999-12-31');
   $('valorLbl').textContent=v&&v.tipo==='HORIMETRO'?'Horímetro atual':'KM atual';
   $('valor').inputMode=v&&v.tipo==='HORIMETRO'?'decimal':'numeric';
   $('placaInfo').textContent=!v?'':u?'Última leitura: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)+' em '+brShort(u.data):'Primeira leitura desta placa.';
@@ -240,7 +265,7 @@ function atualizarInfo(){
   aviso('');
   $('enviar').textContent='Enviar ponto';
 }
-$('placa').onchange=atualizarInfo; $('valor').oninput=atualizarInfo;
+$('placa').onchange=()=>{ desenharDias(); atualizarInfo(); }; $('valor').oninput=atualizarInfo;
 
 /* ---------- enviar ---------- */
 $('enviar').onclick=async()=>{
@@ -249,12 +274,13 @@ $('enviar').onclick=async()=>{
   if(!dia){ aviso('Escolha o dia do ponto: ontem ou hoje.'); return; }
   const n=lerValor();
   if(isNaN(n)){ aviso(v.tipo==='HORIMETRO'?'Digite o horímetro só com números. Ex.: 1234,5':'Digite o KM só com números, sem ponto ou vírgula.'); return; }
-  const u=DADOS.ultimos[v.placa]; const raw=$('valor').value;
-  const limite=v.tipo==='HORIMETRO'?48:3000;
+  if(jaApontado(v.placa,dia)){ aviso('Essa placa já tem ponto em '+brShort(dia)+'. Não é possível apontar de novo.'); return; }
+  const u=anterior(v.placa,dia), prox=proxima(v.placa,dia); const raw=$('valor').value;
+  const limite=LIMITE[v.tipo];
   let alerta='';
-  if(u&&n<u.valor) alerta='Essa leitura é menor que a última ('+num(u.valor,v.tipo)+').';
-  else if(u&&n-u.valor>limite) alerta='Diferença alta: '+num(n-u.valor,v.tipo)+' '+unidade(v.tipo)+' desde a última leitura.';
-  else if(u&&u.data===dia) alerta='Essa placa já tem ponto em '+brShort(dia)+'.';
+  if(u&&n<u.valor) alerta='Essa leitura é menor que a anterior ('+num(u.valor,v.tipo)+' em '+brShort(u.data)+').';
+  else if(prox&&n>prox.valor) alerta='Essa leitura é maior que a de '+brShort(prox.data)+' ('+num(prox.valor,v.tipo)+').';
+  else if(u&&n-u.valor>limite) alerta=(v.tipo==='HORIMETRO'?'O equipamento trabalhou ':'O carro andou ')+num(n-u.valor,v.tipo)+' '+unidade(v.tipo)+' desde a leitura de '+brShort(u.data)+', acima do limite de '+limite+' '+unidade(v.tipo)+'.';
   if(alerta&&confirmado!==raw){
     confirmado=raw; aviso(alerta+' Confira e toque de novo para enviar assim mesmo.');
     $('enviar').textContent='Enviar assim mesmo'; return;
@@ -263,7 +289,7 @@ $('enviar').onclick=async()=>{
   try{ await filaPut(item); }
   catch(e){ aviso('Não foi possível salvar neste celular. Libere espaço e tente de novo.'); return; }
   try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(e){}
-  DADOS.ultimos[v.placa]={valor:n,data:dia}; lsSet('pontos-dados',DADOS);
+  registrarLocal(v.placa,dia,n); lsSet('pontos-dados',DADOS);
   $('valor').value=''; dia=''; confirmado=''; desenharDias(); desenharPlacas(); atualizarInfo();
   $('placa').focus();
   await desenharLista();
@@ -293,7 +319,7 @@ function entrar(){
 }
 async function iniciar(){
   if(!CFG){ mostrar('vSemLink'); return; }
-  if(SESSAO){ entrar(); carregarDados().then(()=>{ desenharPlacas(); atualizarInfo(); }).catch(()=>{}); return; }
+  if(SESSAO){ entrar(); carregarDados().then(()=>{ desenharPlacas(); desenharDias(); atualizarInfo(); }).catch(()=>{}); return; }
   mostrar('vLogin');
   try{ await carregarDados(); }catch(e){}
   desenharLogin();
