@@ -116,7 +116,7 @@ let CFG=lsGet('pontos-cfg',null);
 let DADOS=lsGet('pontos-dados',{usuarios:[],veiculos:[],ultimos:{}});
 let SESSAO=lsGet('pontos-sessao',null);
 DADOS.historico=DADOS.historico||{};
-const LIMITE={KM:300,HORIMETRO:12};
+const LIMITE={KM:500,HORIMETRO:12};
 
 /* ---------- leituras já apontadas por placa ---------- */
 function historico(placa){
