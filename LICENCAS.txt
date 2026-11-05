@@ -1,0 +1,2 @@
+Este app usa Tesseract.js e tesseract.js-core (Apache-2.0) e dados de idioma do Tesseract (Apache-2.0).
+https://github.com/naptha/tesseract.js

@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Pontos de Equipamentos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{--ink:#111;--mid:#555;--line:#999;--soft:#eee;--bg:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 Roboto,"Segoe UI",system-ui,sans-serif}
+main{max-width:560px;margin:0 auto;padding:12px 16px 32px}
+[hidden]{display:none!important}
+h1{font-size:20px;margin:8px 0 12px}
+h2{font-size:15px;margin:20px 0 8px}
+label{display:block;font-weight:700;font-size:15px;margin:16px 0 6px}
+p{margin:0 0 8px}
+button,input,select{font:inherit;color:inherit}
+input,select{width:100%;min-height:48px;padding:10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)}
+#valor{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+button{min-height:48px;padding:8px 12px;background:var(--bg);border:1px solid var(--line);border-radius:4px;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--ink);outline-offset:1px}
+button.main{width:100%;min-height:54px;background:var(--ink);color:#fff;border-color:var(--ink);font-weight:700}
+button:disabled{opacity:.4}
+.on{background:var(--ink)!important;color:#fff!important;border-color:var(--ink)!important;font-weight:700}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.top strong{overflow-wrap:anywhere}
+.top button{flex:none;min-height:40px}
+.hint{color:var(--mid);font-size:14px;margin:6px 0 0}
+.msg{border:1px solid var(--ink);border-radius:4px;padding:10px 12px;margin:12px 0}
+.msg.alert{border-width:3px;font-weight:700}
+.status{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--line);border-radius:4px;padding:8px 12px;margin:8px 0}
+.status button{flex:none;min-height:40px}
+#foto{display:none}
+.fotobtn{display:flex;align-items:center;justify-content:center;width:100%;min-height:54px;border:1px solid var(--ink);border-radius:4px;font-weight:700;cursor:pointer;margin:0}
+#cropWrap{position:relative;margin-top:8px;line-height:0}
+#cropWrap canvas{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:4px;touch-action:none}
+.row{border-top:1px solid var(--line);padding:10px 0;overflow-wrap:anywhere}
+.row strong{display:block}
+.row button{margin-top:6px;min-height:40px}
+.empty{color:var(--mid);padding:8px 0}
+</style>
+</head>
+<body>
+<main>
+  <section id="vSemLink" hidden>
+    <h1>Pontos de Equipamentos</h1>
+    <p>Abra o app pelo link enviado pelo responsável da obra.</p>
+  </section>
+
+  <section id="vLogin" hidden>
+    <h1>Pontos de Equipamentos</h1>
+    <label for="lgUser">Seu nome</label>
+    <select id="lgUser"></select>
+    <label for="lgPin">Senha</label>
+    <input id="lgPin" type="password" inputmode="numeric" autocomplete="off">
+    <p class="msg alert" id="lgErr" hidden></p>
+    <button class="main" id="lgGo" style="margin-top:16px">Entrar</button>
+    <button id="lgRetry" style="width:100%;margin-top:8px" hidden>Tentar carregar a lista de novo</button>
+  </section>
+
+  <section id="vMain" hidden>
+    <div class="top"><strong id="who"></strong><button id="sair">Sair</button></div>
+    <div class="status" id="statusBar"><span id="statusTxt"></span><button id="sendNow" hidden>Enviar agora</button></div>
+
+    <label for="placa">Placa</label>
+    <select id="placa"></select>
+    <p class="hint" id="placaInfo"></p>
+
+    <h2>Dia do ponto</h2>
+    <div class="two" id="dias"></div>
+
+    <h2>Foto do painel</h2>
+    <label class="fotobtn" for="foto" id="fotoLbl">Tirar foto</label>
+    <input id="foto" type="file" accept="image/*" capture="environment">
+    <div id="fotoArea" hidden>
+      <div id="cropWrap"><canvas id="crop"></canvas></div>
+      <p class="hint">Arraste um retângulo sobre os números do painel.</p>
+      <div class="two" style="margin-top:8px">
+        <button id="lerFoto">Ler números</button>
+        <button id="tirarFoto">Remover foto</button>
+      </div>
+      <p class="hint" id="ocrMsg" role="status"></p>
+    </div>
+
+    <label for="valor" id="valorLbl">KM atual</label>
+    <input id="valor" inputmode="numeric" autocomplete="off">
+    <p class="hint" id="difInfo"></p>
+    <p class="msg alert" id="aviso" hidden></p>
+    <button class="main" id="enviar" style="margin-top:12px">Enviar ponto</button>
+
+    <h2>Meus lançamentos neste celular</h2>
+    <div id="lista"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2,'0');
+const iso = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const today = () => iso(new Date());
+const addDays = (s,n) => { const [y,m,d]=s.split('-').map(Number); return iso(new Date(y,m-1,d+n)); };
+const br = s => { const [y,m,d]=s.split('-'); return d+'/'+m+'/'+y; };
+const brShort = s => br(s).slice(0,5);
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2));
+const num = (v,tipo) => Number(v).toLocaleString('pt-BR',{maximumFractionDigits:tipo==='HORIMETRO'?1:0});
+const unidade = t => t==='HORIMETRO' ? 'h' : 'km';
+
+function lsGet(k,f){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):f; }catch(e){ return f; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); return true; }catch(e){ return false; } }
+
+/* ---------- ligação com a planilha (vem no link, nunca no código público) ---------- */
+(function readLink(){
+  const m=location.hash.match(/#c=([A-Za-z0-9_-]+)/); if(!m) return;
+  try{
+    const b=m[1].replace(/-/g,'+').replace(/_/g,'/');
+    const c=JSON.parse(atob(b));
+    if(c.u && c.k){ lsSet('pontos-cfg',c); }
+  }catch(e){}
+  history.replaceState(null,'',location.pathname);
+})();
+let CFG=lsGet('pontos-cfg',null);
+let DADOS=lsGet('pontos-dados',{usuarios:[],veiculos:[],ultimos:{}});
+let SESSAO=lsGet('pontos-sessao',null);
+
+async function api(body){
+  const r=await fetch(CFG.u,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({key:CFG.k},body))});
+  if(!r.ok) throw new Error('rede');
+  return r.json();
+}
+async function carregarDados(){
+  const r=await fetch(CFG.u+'?action=config&key='+encodeURIComponent(CFG.k));
+  if(!r.ok) throw new Error('rede');
+  const j=await r.json();
+  if(!j.ok) throw new Error(j.erro||'erro');
+  DADOS={usuarios:j.usuarios,veiculos:j.veiculos,ultimos:j.ultimos};
+  lsSet('pontos-dados',DADOS);
+}
+
+/* ---------- fila no celular ---------- */
+let dbP=null;
+function db(){
+  if(dbP) return dbP;
+  dbP=new Promise((res,rej)=>{
+    const q=indexedDB.open('pontos',1);
+    q.onupgradeneeded=()=>q.result.createObjectStore('fila',{keyPath:'id'});
+    q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error);
+  });
+  return dbP;
+}
+async function store(mode,fn){
+  const d=await db();
+  return new Promise((res,rej)=>{
+    const t=d.transaction('fila',mode); const q=fn(t.objectStore('fila'));
+    t.oncomplete=()=>res(q&&q.result); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
+  });
+}
+const filaTudo=()=>store('readonly',s=>s.getAll());
+const filaPut=x=>store('readwrite',s=>s.put(x));
+const filaDel=id=>store('readwrite',s=>s.delete(id));
+
+let enviando=false;
+async function enviarFila(){
+  if(enviando) return; enviando=true;
+  try{
+    const itens=(await filaTudo()).filter(i=>!i.erro).sort((a,b)=>a.quando.localeCompare(b.quando));
+    for(const it of itens){
+      let r;
+      try{ r=await api({action:'ponto',usuario:it.usuario,pin:it.pin,id:it.id,data:it.data,placa:it.placa,valor:it.valor,leituraFoto:it.leituraFoto,foto:it.foto}); }
+      catch(e){ break; } /* sem sinal: tenta de novo depois */
+      if(r.ok){
+        const h=lsGet('pontos-hist',[]);
+        h.unshift({id:it.id,data:it.data,placa:it.placa,valor:it.valor,tipo:it.tipo,situacao:r.situacao||'',quando:it.quando});
+        lsSet('pontos-hist',h.slice(0,30));
+        await filaDel(it.id);
+      }else if(r.codigo==='senha'){
+        it.erro='Senha não aceita. Saia e entre de novo.'; await filaPut(it);
+      }else{
+        it.erro=r.erro||'A planilha recusou este ponto.'; await filaPut(it);
+      }
+    }
+  }catch(e){}
+  finally{ enviando=false; }
+  await desenharLista();
+  try{ if((await filaTudo()).filter(i=>!i.erro).length===0){ await carregarDados(); if(SESSAO) atualizarInfo(); } }catch(e){}
+}
+
+/* ---------- login ---------- */
+function mostrar(v){ ['vSemLink','vLogin','vMain'].forEach(x=>$(x).hidden=x!==v); scrollTo(0,0); }
+function desenharLogin(){
+  const us=DADOS.usuarios;
+  $('lgUser').innerHTML='<option value="">Escolha</option>'+us.map(u=>'<option>'+esc(u)+'</option>').join('');
+  $('lgRetry').hidden=us.length>0;
+  if(!us.length){ $('lgErr').textContent='Sem lista de usuários. Abra com sinal de internet ou peça o cadastro ao responsável.'; $('lgErr').hidden=false; }
+  else $('lgErr').hidden=true;
+}
+$('lgRetry').onclick=async()=>{ try{ await carregarDados(); }catch(e){} desenharLogin(); };
+$('lgGo').onclick=async()=>{
+  const usuario=$('lgUser').value, pin=$('lgPin').value.trim();
+  $('lgErr').hidden=true;
+  if(!usuario||!pin){ $('lgErr').textContent='Escolha seu nome e digite a senha.'; $('lgErr').hidden=false; return; }
+  $('lgGo').disabled=true;
+  try{
+    const r=await api({action:'login',usuario,pin});
+    if(!r.ok){ $('lgErr').textContent=r.erro||'Nome ou senha não conferem.'; $('lgErr').hidden=false; return; }
+    SESSAO={usuario,pin}; lsSet('pontos-sessao',SESSAO); $('lgPin').value=''; entrar();
+  }catch(e){ $('lgErr').textContent='Sem conexão. A primeira entrada precisa de internet.'; $('lgErr').hidden=false; }
+  finally{ $('lgGo').disabled=false; }
+};
+$('sair').onclick=async()=>{
+  const n=(await filaTudo()).length;
+  if(n){ aviso('Há '+n+' ponto(s) ainda não enviado(s). Envie antes de sair.'); return; }
+  SESSAO=null; try{localStorage.removeItem('pontos-sessao');}catch(e){}
+  desenharLogin(); mostrar('vLogin');
+};
+
+/* ---------- formulário ---------- */
+let dia='', fotoB64='', leituraFoto='', confirmado='';
+function aviso(t){ $('aviso').textContent=t||''; $('aviso').hidden=!t; }
+function veiculo(){ return DADOS.veiculos.find(v=>v.placa===$('placa').value); }
+function desenharPlacas(){
+  const atual=$('placa').value;
+  const meus=DADOS.veiculos.filter(v=>v.usuario===SESSAO.usuario);
+  const outros=DADOS.veiculos.filter(v=>v.usuario!==SESSAO.usuario);
+  const op=v=>'<option value="'+esc(v.placa)+'">'+esc(v.placa)+(v.descricao?' – '+esc(v.descricao):'')+'</option>';
+  let h='<option value="">Escolha a placa</option>';
+  if(meus.length) h+='<optgroup label="Meus">'+meus.map(op).join('')+'</optgroup>';
+  if(outros.length) h+=(meus.length?'<optgroup label="Outras placas">':'')+outros.map(op).join('')+(meus.length?'</optgroup>':'');
+  $('placa').innerHTML=h;
+  if(atual && DADOS.veiculos.some(v=>v.placa===atual)) $('placa').value=atual;
+  else if(meus.length===1) $('placa').value=meus[0].placa;
+}
+function desenharDias(){
+  const hoje=today(), ontem=addDays(hoje,-1);
+  if(dia!==hoje && dia!==ontem) dia='';
+  $('dias').innerHTML=[[ontem,'Ontem'],[hoje,'Hoje']].map(([d,n])=>'<button data-d="'+d+'" class="'+(d===dia?'on':'')+'" aria-pressed="'+(d===dia)+'">'+n+', '+brShort(d)+'</button>').join('');
+}
+$('dias').onclick=e=>{ const b=e.target.closest('button'); if(b){ dia=b.dataset.d; desenharDias(); atualizarInfo(); } };
+function lerValor(){
+  const v=veiculo(); const raw=$('valor').value.trim(); if(!raw) return NaN;
+  if(v && v.tipo==='HORIMETRO') return /^\d+([.,]\d{1,2})?$/.test(raw)?Number(raw.replace(',','.')):NaN;
+  return /^\d+$/.test(raw)?Number(raw):NaN;
+}
+function atualizarInfo(){
+  const v=veiculo(); const u=v&&DADOS.ultimos[v.placa];
+  $('valorLbl').textContent=v&&v.tipo==='HORIMETRO'?'Horímetro atual':'KM atual';
+  $('valor').inputMode=v&&v.tipo==='HORIMETRO'?'decimal':'numeric';
+  $('placaInfo').textContent=!v?'':u?'Última leitura: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)+' em '+brShort(u.data):'Primeira leitura desta placa.';
+  const n=lerValor();
+  $('difInfo').textContent=(v&&u&&!isNaN(n))?'Diferença: '+num(n-u.valor,v.tipo)+' '+unidade(v.tipo):'';
+  confirmado=confirmado===$('valor').value?confirmado:'';
+  aviso('');
+  $('enviar').textContent='Enviar ponto';
+}
+$('placa').onchange=atualizarInfo; $('valor').oninput=atualizarInfo;
+
+/* ---------- foto ---------- */
+let imgFoto=null, rect=null, drag=null;
+function limparFoto(){
+  fotoB64=''; leituraFoto=''; imgFoto=null; rect=null; $('foto').value='';
+  $('fotoArea').hidden=true; $('fotoLbl').textContent='Tirar foto'; $('ocrMsg').textContent='';
+}
+$('tirarFoto').onclick=limparFoto;
+$('foto').onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const url=URL.createObjectURL(f);
+  const img=new Image();
+  img.onload=()=>{
+    const max=1600, k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*k); c.height=Math.round(img.naturalHeight*k);
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    URL.revokeObjectURL(url);
+    fotoB64=c.toDataURL('image/jpeg',0.75).split(',')[1];
+    imgFoto=c; leituraFoto='';
+    rect={x:c.width*.2,y:c.height*.4,w:c.width*.6,h:c.height*.2};
+    $('crop').width=c.width; $('crop').height=c.height;
+    $('fotoArea').hidden=false; $('fotoLbl').textContent='Tirar outra foto'; $('ocrMsg').textContent='';
+    desenharCrop();
+  };
+  img.onerror=()=>{ URL.revokeObjectURL(url); aviso('Não foi possível abrir essa foto. Tire outra.'); };
+  img.src=url;
+};
+function desenharCrop(){
+  const x=$('crop').getContext('2d'); x.drawImage(imgFoto,0,0);
+  x.fillStyle='rgba(0,0,0,.45)';
+  x.fillRect(0,0,imgFoto.width,rect.y); x.fillRect(0,rect.y+rect.h,imgFoto.width,imgFoto.height-rect.y-rect.h);
+  x.fillRect(0,rect.y,rect.x,rect.h); x.fillRect(rect.x+rect.w,rect.y,imgFoto.width-rect.x-rect.w,rect.h);
+  x.strokeStyle='#fff'; x.lineWidth=Math.max(3,imgFoto.width/300); x.strokeRect(rect.x,rect.y,rect.w,rect.h);
+}
+function ponto(e){ const c=$('crop'), r=c.getBoundingClientRect(); return {x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}; }
+$('crop').onpointerdown=e=>{ drag=ponto(e); $('crop').setPointerCapture(e.pointerId); };
+$('crop').onpointermove=e=>{
+  if(!drag) return; const p=ponto(e);
+  const nx=Math.max(0,Math.min(drag.x,p.x)), ny=Math.max(0,Math.min(drag.y,p.y));
+  rect={x:nx,y:ny,w:Math.min(imgFoto.width,Math.max(drag.x,p.x))-nx,h:Math.min(imgFoto.height,Math.max(drag.y,p.y))-ny};
+  if(rect.w>10&&rect.h>10) desenharCrop();
+};
+$('crop').onpointerup=()=>{ drag=null; if(rect.w<=10||rect.h<=10){ rect={x:imgFoto.width*.2,y:imgFoto.height*.4,w:imgFoto.width*.6,h:imgFoto.height*.2}; desenharCrop(); } };
+
+/* ---------- leitura dos números (no próprio celular) ---------- */
+let ocrWorker=null;
+function carregarScript(src){ return new Promise((res,rej)=>{ if(window.Tesseract) return res(); const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+async function worker(){
+  if(ocrWorker) return ocrWorker;
+  await carregarScript('tesseract.min.js');
+  const base=new URL('./',location.href).href;
+  ocrWorker=await Tesseract.createWorker('eng',1,{workerPath:base+'worker.min.js',corePath:base,langPath:base,gzip:true,workerBlobURL:false,cacheMethod:'none'});
+  await ocrWorker.setParameters({tessedit_char_whitelist:'0123456789',tessedit_pageseg_mode:'7',user_defined_dpi:'300'});
+  return ocrWorker;
+}
+/* Prepara o recorte: tons de cinza, contraste total, tamanho padrão; inverte para painéis de fundo escuro. */
+function preparar(inverter,limiar){
+  const alt=120, k=alt/rect.h;
+  const c=document.createElement('canvas'); c.width=Math.max(50,Math.round(rect.w*k))+40; c.height=alt+40;
+  const x=c.getContext('2d',{willReadFrequently:true}); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
+  x.imageSmoothingQuality='high';
+  x.drawImage(imgFoto,rect.x,rect.y,rect.w,rect.h,20,20,c.width-40,alt);
+  const d=x.getImageData(20,20,c.width-40,alt), p=d.data; let mi=255,ma=0; const g=new Uint8ClampedArray(p.length/4);
+  for(let i=0;i<g.length;i++){ const v=.3*p[i*4]+.59*p[i*4+1]+.11*p[i*4+2]; g[i]=v; if(v<mi)mi=v; if(v>ma)ma=v; }
+  const esc=255/Math.max(1,ma-mi);
+  let soma=0; for(let i=0;i<g.length;i++){ g[i]=(g[i]-mi)*esc; soma+=g[i]; }
+  const media=soma/g.length;
+  const inv=inverter===null?media<128:inverter;
+  for(let i=0;i<g.length;i++){ let v=inv?255-g[i]:g[i]; if(limiar) v=v<limiar?0:255; p[i*4]=p[i*4+1]=p[i*4+2]=v; }
+  x.putImageData(d,20,20);
+  if(inv){ x.fillStyle='#fff'; x.fillRect(0,0,c.width,20); x.fillRect(0,c.height-20,c.width,20); x.fillRect(0,0,20,c.height); x.fillRect(c.width-20,0,20,c.height); }
+  return c;
+}
+/* Escolhe a melhor leitura: precisa fazer sentido diante da última leitura conhecida. */
+function escolher(cands,ultimo,tipo){
+  const limite=tipo==='HORIMETRO'?100:3000;
+  const ok=cands.map(c=>({txt:c.txt,conf:c.conf,n:Number(c.txt)})).filter(c=>c.txt.length>=3);
+  if(!ok.length) return null;
+  if(ultimo!=null){
+    const coer=ok.filter(c=>c.n>=ultimo&&c.n-ultimo<=limite).sort((a,b)=>b.conf-a.conf);
+    if(coer.length) return {valor:coer[0].txt,coerente:true};
+    return {valor:ok.sort((a,b)=>b.conf-a.conf)[0].txt,coerente:false};
+  }
+  return {valor:ok.sort((a,b)=>b.conf-a.conf)[0].txt,coerente:null};
+}
+$('lerFoto').onclick=async()=>{
+  if(!imgFoto) return;
+  const btn=$('lerFoto'); btn.disabled=true;
+  $('ocrMsg').textContent='Lendo os números…';
+  try{
+    const w=await worker();
+    const v=veiculo(); const u=v&&DADOS.ultimos[v.placa];
+    const cands=[];
+    for(const [inv,lim] of [[null,0],[null,128],[true,0],[false,0]]){
+      const r=await w.recognize(preparar(inv,lim));
+      const txt=(r.data.text||'').replace(/\D/g,'');
+      if(txt) cands.push({txt,conf:r.data.confidence});
+    }
+    const e=escolher(cands,u?u.valor:null,v?v.tipo:'KM');
+    if(!e){ $('ocrMsg').textContent='Não foi possível ler. Ajuste o retângulo só sobre os números ou digite o valor.'; return; }
+    leituraFoto=e.valor; $('valor').value=e.valor; atualizarInfo();
+    $('ocrMsg').textContent=e.coerente===false
+      ?'Leitura sugerida: '+e.valor+'. Ela não combina com a última leitura; confira na foto.'
+      :'Leitura sugerida: '+e.valor+'. Confira com a foto antes de enviar.';
+  }catch(err){ $('ocrMsg').textContent='A leitura da foto não está disponível agora. Digite o valor.'; }
+  finally{ btn.disabled=false; }
+};
+
+/* ---------- enviar ---------- */
+$('enviar').onclick=async()=>{
+  const v=veiculo();
+  if(!v){ aviso('Escolha a placa.'); return; }
+  if(!dia){ aviso('Escolha o dia do ponto: ontem ou hoje.'); return; }
+  const n=lerValor();
+  if(isNaN(n)){ aviso(v.tipo==='HORIMETRO'?'Digite o horímetro só com números. Ex.: 1234,5':'Digite o KM só com números, sem ponto ou vírgula.'); return; }
+  const u=DADOS.ultimos[v.placa]; const raw=$('valor').value;
+  const limite=v.tipo==='HORIMETRO'?48:3000;
+  let alerta='';
+  if(u&&n<u.valor) alerta='Essa leitura é menor que a última ('+num(u.valor,v.tipo)+').';
+  else if(u&&n-u.valor>limite) alerta='Diferença alta: '+num(n-u.valor,v.tipo)+' '+unidade(v.tipo)+' desde a última leitura.';
+  else if(u&&u.data===dia) alerta='Essa placa já tem ponto em '+brShort(dia)+'.';
+  if(alerta&&confirmado!==raw){
+    confirmado=raw; aviso(alerta+' Confira e toque de novo para enviar assim mesmo.');
+    $('enviar').textContent='Enviar assim mesmo'; return;
+  }
+  const item={id:uid(),usuario:SESSAO.usuario,pin:SESSAO.pin,data:dia,placa:v.placa,tipo:v.tipo,valor:n,leituraFoto,foto:fotoB64,quando:new Date().toISOString()};
+  try{ await filaPut(item); }
+  catch(e){ aviso('Não foi possível salvar neste celular. Libere espaço e tente de novo.'); return; }
+  try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  DADOS.ultimos[v.placa]={valor:n,data:dia}; lsSet('pontos-dados',DADOS);
+  $('valor').value=''; dia=''; confirmado=''; limparFoto(); desenharDias(); desenharPlacas(); atualizarInfo();
+  $('placa').focus();
+  await desenharLista();
+  enviarFila();
+};
+$('sendNow').onclick=()=>enviarFila();
+
+/* ---------- lista ---------- */
+async function desenharLista(){
+  const fila=(await filaTudo()).sort((a,b)=>b.quando.localeCompare(a.quando));
+  const hist=lsGet('pontos-hist',[]);
+  const pend=fila.filter(i=>!i.erro).length, errs=fila.filter(i=>i.erro).length;
+  $('statusTxt').textContent=errs?errs+' ponto(s) recusado(s). Veja abaixo.':pend?pend+' ponto(s) salvo(s) no celular, aguardando sinal.':'Todos os pontos foram enviados.';
+  $('sendNow').hidden=!pend;
+  const linha=(x,st,extra)=>'<div class="row"><strong>'+esc(x.placa)+' · '+num(x.valor,x.tipo)+' '+unidade(x.tipo)+'</strong>Dia '+br(x.data)+' · '+esc(st)+(extra||'')+'</div>';
+  const h=fila.map(i=>i.erro
+    ?linha(i,i.erro,'<br><button data-rem="'+i.id+'">Excluir do celular</button>')
+    :linha(i,'Aguardando envio')).concat(hist.map(i=>linha(i,i.situacao&&i.situacao!=='OK'?'Enviado: '+i.situacao:'Enviado')));
+  $('lista').innerHTML=h.length?h.join(''):'<p class="empty">Nenhum ponto lançado neste celular.</p>';
+}
+$('lista').onclick=async e=>{ const b=e.target.closest('[data-rem]'); if(b){ await filaDel(b.dataset.rem); desenharLista(); } };
+
+/* ---------- início ---------- */
+function entrar(){
+  $('who').textContent=SESSAO.usuario; mostrar('vMain');
+  desenharPlacas(); desenharDias(); atualizarInfo(); desenharLista(); enviarFila();
+}
+async function iniciar(){
+  if(!CFG){ mostrar('vSemLink'); return; }
+  if(SESSAO){ entrar(); carregarDados().then(()=>{ desenharPlacas(); atualizarInfo(); }).catch(()=>{}); return; }
+  mostrar('vLogin');
+  try{ await carregarDados(); }catch(e){}
+  desenharLogin();
+}
+window.addEventListener('online',()=>{ if(SESSAO) enviarFila(); });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&SESSAO){ desenharDias(); enviarFila(); } });
+setInterval(()=>{ if(SESSAO&&!document.hidden) enviarFila(); },60000);
+iniciar();
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+</script>
+</body>
+</html>
