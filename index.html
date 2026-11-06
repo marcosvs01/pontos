@@ -62,7 +62,7 @@ button:disabled{opacity:.4}
   </section>
 
   <section id="vMain" hidden>
-    <div class="top"><strong id="who"></strong><button id="sair">Sair</button></div>
+    <div class="top"><strong id="who"></strong><span style="display:flex;gap:6px;flex:none"><button id="abrirCaderneta" hidden>Caderneta</button><button id="sair">Sair</button></span></div>
     <div class="status" id="statusBar"><span id="statusTxt"></span><button id="sendNow" hidden>Enviar agora</button></div>
 
     <label for="placa">Placa</label>
@@ -327,6 +327,7 @@ $('enviar').onclick=async()=>{
   enviarFila();
 };
 $('sendNow').onclick=()=>enviarFila();
+$('abrirCaderneta').onclick=()=>{ location.href='caderneta.html'; };
 
 /* ---------- lista ---------- */
 async function desenharLista(){
@@ -346,6 +347,7 @@ $('lista').onclick=async e=>{ const b=e.target.closest('[data-rem]'); if(b){ awa
 /* ---------- início ---------- */
 function entrar(){
   $('who').textContent=SESSAO.usuario; mostrar('vMain');
+  $('abrirCaderneta').hidden=!/^marcos/i.test(SESSAO.usuario.trim());
   desenharPlacas(); desenharDias(); atualizarInfo(); desenharLista(); enviarFila();
 }
 async function iniciar(){
