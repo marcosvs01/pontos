@@ -279,8 +279,8 @@ function desenharDias(){
   $('diaTxt').textContent=dia?(br(dia)+(domingo(dia)?' (domingo)':'')):(trava||'Escolha a placa.');
   $('diaTxt').classList.toggle('trava',!!trava);
   $('enviar').disabled=!dia;
-  /* "Não houve uso": só no domingo e só se a placa já tem leitura anterior. */
-  const pode=!!(v&&dia&&domingo(dia)&&anterior(v.placa,dia));
+  /* "Não houve uso": qualquer dia, desde que a placa já tenha leitura anterior. */
+  const pode=!!(v&&dia&&anterior(v.placa,dia));
   $('semUsoBox').hidden=!pode;
   if(!pode) $('semUso').checked=false;
   $('valorBox').hidden=semUso();
