@@ -41,6 +41,8 @@ button:disabled{opacity:.4}
 #diaTxt{font-size:20px;font-weight:700;margin:0;font-variant-numeric:tabular-nums}
 #diaTxt.trava{font-size:16px;border:3px solid var(--ink);border-radius:4px;padding:10px 12px}
 #difInfo{color:var(--ink);font-size:18px;font-weight:700;margin:8px 0 0}
+.chk{display:flex;align-items:center;gap:12px;font-weight:700;border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin:16px 0 0;cursor:pointer}
+.chk input{width:26px;height:26px;min-height:26px;flex:none;margin:0}
 </style>
 </head>
 <body>
@@ -71,9 +73,12 @@ button:disabled{opacity:.4}
 
     <h2>Dia do ponto</h2>
     <p id="diaTxt"></p>
+    <label class="chk" id="semUsoBox" hidden><input type="checkbox" id="semUso"> Não houve uso neste dia</label>
 
+    <div id="valorBox">
     <label for="valor" id="valorLbl">KM atual</label>
     <input id="valor" inputmode="numeric" autocomplete="off">
+    </div>
     <p class="hint" id="difInfo"></p>
     <p class="msg alert" id="aviso" hidden></p>
     <p class="msg" id="feito" role="status" hidden></p>
@@ -189,11 +194,11 @@ async function enviarFila(){
     const itens=(await filaTudo()).filter(i=>!i.erro).sort((a,b)=>a.quando.localeCompare(b.quando));
     for(const it of itens){
       let r;
-      try{ r=await api({action:'ponto',usuario:it.usuario,pin:it.pin,id:it.id,data:it.data,placa:it.placa,valor:it.valor}); }
+      try{ r=await api({action:'ponto',usuario:it.usuario,pin:it.pin,id:it.id,data:it.data,placa:it.placa,valor:it.valor,semUso:it.semUso===true}); }
       catch(e){ break; } /* sem sinal: tenta de novo depois */
       if(r.ok){
         const h=lsGet('pontos-hist',[]);
-        h.unshift({id:it.id,data:it.data,placa:it.placa,valor:it.valor,tipo:it.tipo,dif:it.dif,situacao:r.situacao||'',quando:it.quando});
+        h.unshift({id:it.id,data:it.data,placa:it.placa,valor:it.valor,tipo:it.tipo,dif:it.dif,semUso:it.semUso===true,situacao:r.situacao||'',quando:it.quando});
         lsSet('pontos-hist',h.slice(0,30));
         await filaDel(it.id);
       }else if(r.codigo==='senha'){
@@ -271,10 +276,17 @@ function desenharDias(){
       else dia=p;
     }
   }
-  $('diaTxt').textContent=dia?br(dia):(trava||'Escolha a placa.');
+  $('diaTxt').textContent=dia?(br(dia)+(domingo(dia)?' (domingo)':'')):(trava||'Escolha a placa.');
   $('diaTxt').classList.toggle('trava',!!trava);
   $('enviar').disabled=!dia;
+  /* "Não houve uso": só no domingo e só se a placa já tem leitura anterior. */
+  const pode=!!(v&&dia&&domingo(dia)&&anterior(v.placa,dia));
+  $('semUsoBox').hidden=!pode;
+  if(!pode) $('semUso').checked=false;
+  $('valorBox').hidden=semUso();
 }
+const domingo=s=>{ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d).getDay()===0; };
+const semUso=()=>$('semUso').checked&&!$('semUsoBox').hidden;
 function lerValor(){
   const v=veiculo(); const raw=$('valor').value.trim(); if(!raw) return NaN;
   if(v && v.tipo==='HORIMETRO') return /^\d+([.,]\d{1,2})?$/.test(raw)?Number(raw.replace(',','.')):NaN;
@@ -286,13 +298,15 @@ function atualizarInfo(){
   $('valor').inputMode=v&&v.tipo==='HORIMETRO'?'decimal':'numeric';
   $('placaInfo').textContent=!v?'':u?(u.data?'Última leitura: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)+' em '+brShort(u.data):'Leitura anterior cadastrada: '+num(u.valor,v.tipo)+' '+unidade(v.tipo)):'Primeira leitura desta placa.';
   const n=lerValor();
-  $('difInfo').textContent=(v&&u&&!isNaN(n))?rotulo(v.tipo,n-u.valor)+' desde a leitura '+quando(u):'';
+  if(v&&u&&semUso()) $('difInfo').textContent='Sem uso: 0 '+unidade(v.tipo)+'. Fica a mesma leitura '+quando(u)+' ('+num(u.valor,v.tipo)+' '+unidade(v.tipo)+').';
+  else $('difInfo').textContent=(v&&u&&!isNaN(n))?rotulo(v.tipo,n-u.valor)+' desde a leitura '+quando(u):'';
   confirmado=confirmado===$('valor').value?confirmado:'';
   aviso('');
   if($('valor').value) $('feito').hidden=true;
   $('enviar').textContent='Enviar ponto';
 }
 $('placa').onchange=()=>{ desenharDias(); atualizarInfo(); }; $('valor').oninput=atualizarInfo;
+$('semUso').onchange=()=>{ $('valorBox').hidden=semUso(); confirmado=''; atualizarInfo(); };
 
 /* ---------- enviar ---------- */
 $('enviar').onclick=async()=>{
@@ -300,7 +314,9 @@ $('enviar').onclick=async()=>{
   if(!v){ aviso('Escolha a placa.'); return; }
   desenharDias();
   if(!dia) return;
-  const n=lerValor();
+  const sem=semUso();
+  const n=sem?(anterior(v.placa,dia)||{}).valor:lerValor();
+  if(sem&&typeof n!=='number'){ aviso('Esta placa não tem leitura anterior. Digite a leitura do painel.'); return; }
   if(isNaN(n)){ aviso(v.tipo==='HORIMETRO'?'Digite o horímetro só com números. Ex.: 1234,5':'Digite o KM só com números, sem ponto ou vírgula.'); return; }
   if(jaApontado(v.placa,dia)){ aviso('Essa placa já tem ponto em '+brShort(dia)+'. Não é possível apontar de novo.'); return; }
   const u=anterior(v.placa,dia), prox=proxima(v.placa,dia); const raw=$('valor').value;
@@ -309,18 +325,19 @@ $('enviar').onclick=async()=>{
   if(u&&n<u.valor) alerta='Essa leitura é menor que a anterior ('+num(u.valor,v.tipo)+', '+quando(u)+').';
   else if(prox&&n>prox.valor) alerta='Essa leitura é maior que a de '+brShort(prox.data)+' ('+num(prox.valor,v.tipo)+').';
   else if(u&&n-u.valor>limite) alerta=(v.tipo==='HORIMETRO'?'O equipamento trabalhou ':'O carro andou ')+num(n-u.valor,v.tipo)+' '+unidade(v.tipo)+' desde a leitura '+quando(u)+', acima do limite de '+limite+' '+unidade(v.tipo)+'.';
+  if(sem) alerta='';
   if(alerta&&confirmado!==raw){
     confirmado=raw; aviso(alerta+' Confira e toque de novo para enviar assim mesmo.');
     $('enviar').textContent='Enviar assim mesmo'; return;
   }
   const dif=u?n-u.valor:null;
-  const item={id:uid(),usuario:SESSAO.usuario,pin:SESSAO.pin,data:dia,placa:v.placa,tipo:v.tipo,valor:n,dif,quando:new Date().toISOString()};
+  const item={id:uid(),usuario:SESSAO.usuario,pin:SESSAO.pin,data:dia,placa:v.placa,tipo:v.tipo,valor:n,dif,semUso:sem,quando:new Date().toISOString()};
   try{ await filaPut(item); }
   catch(e){ aviso('Não foi possível salvar neste celular. Libere espaço e tente de novo.'); return; }
   try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist(); }catch(e){}
   registrarLocal(v.placa,dia,n); lsSet('pontos-dados',DADOS);
-  $('valor').value=''; confirmado=''; desenharPlacas(); desenharDias(); atualizarInfo();
-  $('feito').textContent='Ponto de '+brShort(item.data)+' salvo.'+(dif!==null?' '+rotulo(v.tipo,dif)+' desde a leitura anterior.':'');
+  $('valor').value=''; $('semUso').checked=false; confirmado=''; desenharPlacas(); desenharDias(); atualizarInfo();
+  $('feito').textContent='Ponto de '+brShort(item.data)+' salvo.'+(sem?' Sem uso no dia (0 '+unidade(v.tipo)+').':dif!==null?' '+rotulo(v.tipo,dif)+' desde a leitura anterior.':'');
   $('feito').hidden=false;
   $('placa').focus();
   await desenharLista();
@@ -337,7 +354,7 @@ async function desenharLista(){
   const pend=fila.filter(i=>!i.erro).length, errs=fila.filter(i=>i.erro).length;
   $('statusTxt').textContent=errs?errs+' ponto(s) recusado(s). Veja abaixo.':pend?pend+' ponto(s) salvo(s) no celular, aguardando sinal.':'Todos os pontos foram enviados.';
   $('sendNow').hidden=!pend;
-  const linha=(x,st,extra)=>'<div class="row"><strong>'+esc(x.placa)+' · '+num(x.valor,x.tipo)+' '+unidade(x.tipo)+'</strong>Dia '+br(x.data)+(typeof x.dif==='number'?' · '+rotulo(x.tipo,x.dif):'')+' · '+esc(st)+(extra||'')+'</div>';
+  const linha=(x,st,extra)=>'<div class="row"><strong>'+esc(x.placa)+' · '+num(x.valor,x.tipo)+' '+unidade(x.tipo)+'</strong>Dia '+br(x.data)+(x.semUso?' · Sem uso':typeof x.dif==='number'?' · '+rotulo(x.tipo,x.dif):'')+' · '+esc(st)+(extra||'')+'</div>';
   const h=fila.map(i=>i.erro
     ?linha(i,i.erro,'<br><button data-rem="'+i.id+'">Excluir do celular</button>')
     :linha(i,'Aguardando envio')).concat(hist.map(i=>linha(i,i.situacao&&i.situacao!=='OK'?'Enviado: '+i.situacao:'Enviado')));
